@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The default token needs nothing beyond reading the checkout.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18.17', '20', '22']
+        os: [ubuntu-latest]
+        include:
+          # Rotation is filesystem semantics all the way down: rename over an
+          # open file, fsync on a directory, pid liveness and file modes all
+          # differ by platform, so the other two are not optional.
+          - node: '20'
+            os: macos-latest
+          - node: '20'
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Verify both module formats load
+        run: |
+          node -e "import('./dist/esm/index.js').then(m => console.log('esm ok', typeof m.createArchiver))"
+          node -e "console.log('cjs ok', typeof require('./dist/cjs/index.js').createArchiver)"
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run coverage
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # What ships is the thing to be strict about: this package has no runtime
+      # dependencies, so anything at all here is a real finding.
+      - name: Audit what ships
+        run: npm audit --omit=dev --audit-level=low
+      # Advisories in the test toolchain matter, but they do not reach a
+      # consumer and must not be able to turn a release red on their own.
+      - name: Audit the toolchain (informational)
+        continue-on-error: true
+        run: npm audit --audit-level=moderate
+      - name: Assert there are no runtime dependencies
+        run: |
+          node -e "
+            const { dependencies = {} } = require('./package.json');
+            const names = Object.keys(dependencies);
+            if (names.length) { console.error('Unexpected runtime dependencies:', names); process.exit(1); }
+            console.log('no runtime dependencies');
+          "

@@ -1,0 +1,74 @@
+{
+  "name": "@osqd/archiverjs",
+  "version": "0.1.0",
+  "description": "Seamless automatic archival for TypeScript and Node.js — rotate, compress and prune log files (and anything else that grows) while the program keeps running.",
+  "author": "Michał Płatosz <platosz.michal@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OSQD-ts/ArchiverJS.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OSQD-ts/ArchiverJS/issues"
+  },
+  "homepage": "https://github.com/OSQD-ts/ArchiverJS#readme",
+  "keywords": [
+    "archive",
+    "archival",
+    "log-rotation",
+    "logrotate",
+    "rotation",
+    "gzip",
+    "brotli",
+    "zstd",
+    "retention",
+    "logs",
+    "typescript"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "sideEffects": false,
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "npm run clean && npm run build:esm && npm run build:cjs && node scripts/finalize-build.mjs",
+    "build:esm": "tsc -p tsconfig.build.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "lint": "npm run typecheck",
+    "example": "tsx examples/logs.ts",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@vitest/coverage-v8": "^3.2.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.7"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
