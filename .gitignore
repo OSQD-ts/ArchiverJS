@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.tmp/
+
+# Local agent instructions
+CLAUDE.md
+.claude/

@@ -1,0 +1,108 @@
+name: Publish
+
+on:
+  # A pushed version tag is the release. One trigger rather than two, because
+  # tagging and then publishing a GitHub Release would otherwise fire this
+  # twice, and the second run would fail on a version that is already up.
+  # Write the release notes afterwards; they do not need to gate the publish.
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required for npm provenance, which signs the package with a verifiable link
+  # back to the commit and workflow that built it.
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # Fail here, with a reason, rather than at the last step with a registry
+      # error code. These are three different problems with three different
+      # fixes, and the publish step cannot tell them apart.
+      - name: Check the npm credentials before doing any work
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN is empty. An organisation secret is not visible to a" \
+                 "repository until that repository is added to the secret's access list."
+            exit 1
+          fi
+          if ! who=$(npm whoami 2>&1); then
+            echo "::error::npm rejected the token: ${who}. It may be expired, or a classic" \
+                 "token that demands a one-time password — publishing from CI needs an" \
+                 "Automation token, which is exempt from 2FA."
+            exit 1
+          fi
+          echo "authenticated as ${who}"
+          scope=$(node -p "require('./package.json').name.split('/')[0]")
+          if ! npm access list packages "${scope}" >/dev/null 2>&1; then
+            echo "::warning::${who} may not have write access to the ${scope} scope. If the" \
+                 "publish fails with 403, that is why."
+          fi
+
+      # A release tagged v1.2.3 that ships 1.2.2 is worse than a failed
+      # release, because nothing afterwards makes the mismatch obvious.
+      - name: Check the tag matches the version being published
+        if: github.ref_type == 'tag'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $version" >&2
+            exit 1
+          fi
+          echo "Publishing $version"
+
+      - name: Refuse to republish an existing version
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on the registry" >&2
+            exit 1
+          fi
+
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Verify the package contents before sending them
+        run: |
+          npm pack --dry-run
+          node -e "
+            const { execSync } = require('node:child_process');
+            const [{ files }] = JSON.parse(execSync('npm pack --dry-run --json', { encoding: 'utf8' }));
+            const shipped = files.map((f) => f.path);
+            if (!shipped.some((f) => f.startsWith('dist/'))) {
+              console.error('Refusing to publish: no dist/ in the tarball');
+              process.exit(1);
+            }
+            const leaked = shipped.filter((f) => f.startsWith('src/') || f.startsWith('test/'));
+            if (leaked.length) {
+              console.error('Refusing to publish: unexpected files', leaked);
+              process.exit(1);
+            }
+            console.log('tarball contains', shipped.length, 'files');
+          "
+
+      - name: Publish to npm
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
